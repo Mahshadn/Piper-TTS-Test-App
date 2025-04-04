@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environment
+venv/
+ENV/
+
+# Logs
+*.log
+
+# Output files
+output/*.wav
+
+# Local development settings
+.env
+.vscode/
+.idea/
+
+# Piper voice models (potentially large files)
+models/tts/*.onnx
+models/tts/*.json
+
+# Don't ignore the gitkeep files
+!models/tts/.gitkeep
+!output/.gitkeep
