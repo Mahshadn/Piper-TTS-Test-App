@@ -5,24 +5,69 @@ import os
 import logging
 import subprocess
 import json
+import sys
 from typing import Dict, Optional, List, Tuple
 
 class PiperTTS:
-    """A wrapper for the Piper TTS command-line interface."""
+    """A wrapper for the Piper TTS command-line executable."""
     
-    def __init__(self, models_dir: str = "./models/tts"):
+    def __init__(self, models_dir: str = "./models/tts", piper_executable: str = None):
         """
         Initialize the PiperTTS class.
         
         Args:
             models_dir: Directory containing the voice model files
+            piper_executable: Path to the piper executable (default: auto-detect)
         """
         self.models_dir = models_dir
         self.available_models = self._find_models()
         self.logger = logging.getLogger("PiperTTS")
         
+        # Find the piper executable
+        self.piper_executable = piper_executable
+        if not self.piper_executable:
+            self.piper_executable = self._find_piper_executable()
+        
         # Create output directory if it doesn't exist
         os.makedirs("output", exist_ok=True)
+    
+    def _find_piper_executable(self) -> str:
+        """
+        Find the piper executable.
+        
+        Returns:
+            Path to the piper executable
+        """
+        # Check if piper is in the current directory
+        if os.path.exists("piper"):
+            return "./piper"
+        elif os.path.exists("piper.exe"):
+            return "./piper.exe"
+        
+        # Check if piper is in the PATH
+        try:
+            if sys.platform == "win32":
+                # On Windows, check common locations
+                potential_paths = [
+                    "./piper.exe",
+                    "../piper.exe",
+                    "../../piper.exe",
+                    "./piper/piper.exe",
+                    "../piper/piper.exe"
+                ]
+                for path in potential_paths:
+                    if os.path.exists(path):
+                        return path
+                
+                # If not found, assume it's in the PATH
+                return "piper.exe"
+            else:
+                # On Unix systems
+                subprocess.run(["which", "piper"], check=True, stdout=subprocess.PIPE)
+                return "piper"
+        except (subprocess.SubprocessError, FileNotFoundError):
+            self.logger.warning("Could not find piper in PATH. Please specify the path to the piper executable.")
+            return "piper"  # Default to just "piper", hoping it's in the PATH
     
     def _find_models(self) -> Dict[str, str]:
         """
@@ -78,7 +123,7 @@ class PiperTTS:
         json_path = f"{model_path}.json"
         
         # Build the command
-        cmd = ["piper", "--model", model_path, "--output_file", output_file]
+        cmd = [self.piper_executable, "--model", model_path, "--output_file", output_file]
         
         # Add speaker ID if provided
         if speaker_id is not None:
