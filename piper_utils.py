@@ -132,12 +132,21 @@ class PiperTTS:
         # Check if model is multi-speaker from the JSON config
         if os.path.exists(json_path):
             try:
-                with open(json_path, 'r') as f:
+                with open(json_path, 'r', encoding='utf-8') as f:
                     config = json.load(f)
                     if config.get('num_speakers', 1) > 1 and speaker_id is None:
                         # Multi-speaker model, but no speaker ID was provided
                         # Use the first speaker (0) by default
                         cmd.extend(["--speaker", "0"])
+            except UnicodeDecodeError:
+                # Try with different encodings if utf-8 fails
+                try:
+                    with open(json_path, 'r', encoding='latin-1') as f:
+                        config = json.load(f)
+                        if config.get('num_speakers', 1) > 1 and speaker_id is None:
+                            cmd.extend(["--speaker", "0"])
+                except Exception as e:
+                    self.logger.warning(f"Could not read model config file with latin-1 encoding: {e}")
             except (json.JSONDecodeError, IOError) as e:
                 self.logger.warning(f"Could not read model config file: {e}")
         
