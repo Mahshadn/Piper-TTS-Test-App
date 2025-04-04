@@ -62,11 +62,11 @@ class SynthesisThread(QThread):
 class PiperTTSApp(QMainWindow):
     """Main application window for Piper TTS testing."""
     
-    def __init__(self):
+    def __init__(self, piper_executable=None):
         super().__init__()
         
-        # Initialize Piper TTS
-        self.piper = PiperTTS()
+        # Initialize Piper TTS with optional executable path
+        self.piper = PiperTTS(piper_executable=piper_executable)
         self.threads = []  # Keep track of running threads
         
         self.available_models = self.piper.list_models()
@@ -286,8 +286,12 @@ class PiperTTSApp(QMainWindow):
 
 def main():
     """Main entry point for the application."""
+    # You can specify the path to the piper executable here if needed
+    # piper_executable = "path/to/piper.exe"  # Uncomment and modify if needed
+    piper_executable = None  # Auto-detect
+    
     app = QApplication(sys.argv)
-    window = PiperTTSApp()
+    window = PiperTTSApp(piper_executable)
     window.show()
     sys.exit(app.exec_())
 
