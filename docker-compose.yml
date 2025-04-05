@@ -1,0 +1,15 @@
+version: '3'
+
+services:
+  piper:
+    image: linuxserver/piper:latest
+    container_name: piper-tts
+    volumes:
+      - ./models/tts:/config/voices  # Mount your voice models
+      - ./output:/output             # Mount output directory
+    environment:
+      - PIPER_VOICE=en_US-joe-medium # Default voice
+      - PIPER_SPEAKER=0              # Default speaker
+    ports:
+      - "10200:10200"                # Wyoming protocol port
+    restart: unless-stopped
