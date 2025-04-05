@@ -1,14 +1,50 @@
 # Piper TTS Test App
 
-A simple Windows application to test Piper TTS with different voice models.
+A simple application to test Piper TTS with different voice models. Supports both native and Docker-based deployments.
 
-## Prerequisites
+## Project Structure
+
+- `app.py`: Main Python GUI application using PyQt5
+- `piper_utils.py`: Utility functions for working with native Piper TTS
+- `piper_wyoming.py`: Client for Dockerized Piper TTS using Wyoming protocol
+- `test_wyoming.py`: Test script for the Docker setup
+- `code_integration_guide.py`: Example of integrating Docker TTS with PyQt5
+- `docker-compose.yml`: Docker configuration for Piper TTS
+- `models/tts/`: Directory to store voice models
+- `output/`: Directory where output audio files are saved
+- `run.bat`: Windows batch file to run the native application
+
+## Deployment Options
+
+This project supports two deployment methods:
+
+### 1. Native Mode (Original)
+
+Run Piper directly on your system without Docker. Good for Windows development. See the original README below for details.
+
+### 2. Docker Mode (Cross-Platform)
+
+Run Piper in a Docker container, which works on both Windows and Linux. This is the recommended approach for production.
+
+**To use Docker mode:**
+1. Download voice models as described below
+2. Follow instructions in [DOCKER_SETUP_GUIDE.md](DOCKER_SETUP_GUIDE.md)
+3. Start with `docker-compose up -d`
+4. Test with `python test_wyoming.py`
+
+The Docker approach provides better cross-platform compatibility and isolates dependencies.
+
+---
+
+## Original README Content
+
+### Prerequisites
 
 - Python 3.8 or newer
 - Piper TTS extracted locally (not installed via pip)
 - Voice models placed in the `/models/tts/` directory
 
-## Voice Models
+### Voice Models
 
 This application is configured to work with the following voice models:
 - en_US-joe-medium
@@ -23,7 +59,7 @@ Make sure these model files are placed in the `/models/tts/` directory as shown:
   └── en_US-libritts_r-medium.onnx.json
 ```
 
-## Installation
+### Installation
 
 1. Clone this repository:
    ```
@@ -37,7 +73,7 @@ Make sure these model files are placed in the `/models/tts/` directory as shown:
    ```
 
 3. Activate the virtual environment:
-   - Windows: `venv\Scripts\activate`
+   - Windows: `venv\\Scripts\\activate`
    - macOS/Linux: `source venv/bin/activate`
 
 4. Install the required Python dependencies:
@@ -45,7 +81,7 @@ Make sure these model files are placed in the `/models/tts/` directory as shown:
    pip install -r requirements.txt
    ```
 
-## Piper TTS Setup
+### Piper TTS Setup
 
 1. Download Piper TTS:
    - Go to [https://github.com/rhasspy/piper/releases](https://github.com/rhasspy/piper/releases)
@@ -64,7 +100,7 @@ Make sure these model files are placed in the `/models/tts/` directory as shown:
    - Rename them to `en_US-joe-medium.onnx`, `en_US-joe-medium.onnx.json`, `en_US-libritts_r-medium.onnx`, and `en_US-libritts_r-medium.onnx.json`
    - Place them in the `models/tts/` directory
 
-## Usage
+### Usage
 
 1. Run the application:
    ```
@@ -79,16 +115,15 @@ Make sure these model files are placed in the `/models/tts/` directory as shown:
 
 4. The output files will be saved in the `output` directory.
 
-## Project Structure
+## Docker Support
 
-- `app.py`: Main Python script with GUI interface
-- `piper_utils.py`: Utility functions for working with Piper TTS
-- `requirements.txt`: Required Python packages
-- `models/tts/`: Directory to store voice models
-- `output/`: Directory where output audio files are saved
-- `run.bat`: Windows batch file to run the application
+This project now includes Docker support for cross-platform compatibility. Instead of installing Piper natively on each platform, you can run it in a Docker container.
+
+See the [DOCKER_SETUP_GUIDE.md](DOCKER_SETUP_GUIDE.md) for full details on setting up and using the Docker deployment option.
 
 ## Troubleshooting
+
+### Native Mode Issues
 
 If the application cannot find the Piper executable:
 
@@ -103,3 +138,7 @@ If the application cannot find the Piper executable:
    ```
 
 3. Check the log file `piper_app.log` for any errors.
+
+### Docker Mode Issues
+
+See the Troubleshooting section in [DOCKER_SETUP_GUIDE.md](DOCKER_SETUP_GUIDE.md) for Docker-specific issues and solutions.
