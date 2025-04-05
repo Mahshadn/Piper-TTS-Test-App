@@ -9,6 +9,7 @@ import base64
 import os
 import logging
 import time
+import sys
 
 logger = logging.getLogger("PiperWyoming")
 
@@ -74,18 +75,19 @@ class PiperWyomingClient:
                 print(f"Sending request: {json.dumps(request)}")
                 
             # Add newline to separate JSON objects
-            s.sendall(json.dumps(request).encode() + b"\n")
+            s.sendall(json.dumps(request).encode('utf-8') + b"\n")
             
-            # Receive and process response
+            # New approach: Read the raw response in binary mode
             audio_data = bytearray()
+            
+            # We'll use a simple state machine to parse the response
+            # State 0: Looking for JSON response
+            # State 1: Collecting audio data
+            state = 0
             buffer = bytearray()
             
-            # Wait for response with timeout
-            start_time = time.time()
-            timeout = 30  # 30 seconds timeout
-            
-            while (time.time() - start_time) < timeout:
-                try:
+            try:
+                while True:
                     chunk = s.recv(4096)
                     if not chunk:
                         if debug:
@@ -94,54 +96,126 @@ class PiperWyomingClient:
                     
                     if debug:
                         print(f"Received {len(chunk)} bytes")
-                        
-                    buffer.extend(chunk)
                     
-                    # Process complete lines in the buffer
-                    while b"\n" in buffer:
-                        line_end = buffer.find(b"\n")
-                        line = bytes(buffer[:line_end])
-                        buffer = buffer[line_end + 1:]
+                    # Fixed approach for Windows: use direct binary processing
+                    # Look for JSON responses (they should be UTF-8 encoded and end with newline)
+                    if state == 0:
+                        buffer.extend(chunk)
+                        newline_pos = buffer.find(b'\n')
                         
-                        if line:
-                            if debug:
-                                print(f"Processing line: {line[:100]}...")
-                                
+                        while newline_pos >= 0:
+                            line = buffer[:newline_pos]
+                            buffer = buffer[newline_pos + 1:]
+                            
                             try:
-                                response = json.loads(line)
-                                
+                                # Decode line as UTF-8 (safer than default encoding)
+                                json_str = line.decode('utf-8')
                                 if debug:
-                                    print(f"Response type: {response['type']}")
+                                    print(f"Processing JSON: {json_str[:100]}...")
+                                
+                                response = json.loads(json_str)
                                 
                                 if response["type"] == "audio":
-                                    # Decode base64 audio data
-                                    audio_bytes = base64.b64decode(response["data"]["audio"])
-                                    audio_data.extend(audio_bytes)
-                                    
+                                    if debug:
+                                        print("Received audio data")
+                                    try:
+                                        # Get audio data from base64
+                                        audio_chunk = base64.b64decode(response["data"]["audio"])
+                                        audio_data.extend(audio_chunk)
+                                    except Exception as e:
+                                        if debug:
+                                            print(f"Error decoding audio: {e}")
+                                
                                 elif response["type"] == "error":
                                     return False, f"Server error: {response['data'].get('text', 'Unknown error')}"
-                                    
+                                
                                 elif response["type"] == "end":
-                                    # End of audio stream
                                     if debug:
                                         print("End of audio stream")
+                                    state = 1  # Done processing
                                     break
                                     
+                            except UnicodeDecodeError as e:
+                                if debug:
+                                    print(f"Unicode error (trying to continue): {e}")
+                                # Skip this chunk and continue
+                                pass
                             except json.JSONDecodeError as e:
                                 if debug:
-                                    print(f"Failed to parse JSON: {e}, Line: {line[:100]}...")
-                                continue
+                                    print(f"JSON error (trying to continue): {e}")
+                                # Skip this chunk and continue
+                                pass
+                            
+                            # Look for next newline
+                            newline_pos = buffer.find(b'\n')
                     
-                    # If we received end signal, break out of the loop
-                    if response.get("type") == "end":
+                    # If we're done processing JSON or buffer is too large, break
+                    if state == 1 or len(buffer) > 100000:
                         break
-                        
-                except socket.timeout:
-                    if debug:
-                        print("Socket timeout, retrying...")
-                    continue
+                
+            except socket.timeout:
+                if debug:
+                    print("Socket timeout while reading")
             
             s.close()
+            
+            # Try a direct approach - execute Docker commands
+            if not audio_data and sys.platform == "win32":
+                if debug:
+                    print("No audio data received. Trying direct Docker approach...")
+                
+                # Save the text to a temporary file
+                with open("temp_text.txt", "w", encoding="utf-8") as f:
+                    f.write(text)
+                
+                try:
+                    # Run piper directly in the container
+                    cmd = [
+                        "docker", "exec", "piper-tts",
+                        "sh", "-c", 
+                        f"cd /config && echo '{text}' | "
+                        f"/usr/share/piper/piper "
+                        f"--model /config/models/tts/en_US-joe-medium.onnx "
+                        f"--output_raw > /tmp/output.raw"
+                    ]
+                    
+                    if debug:
+                        print(f"Running command: {' '.join(cmd)}")
+                    
+                    result = subprocess.run(cmd, capture_output=True, text=True)
+                    
+                    if result.returncode != 0:
+                        if debug:
+                            print(f"Command failed: {result.stderr}")
+                        return False, f"Direct command failed: {result.stderr}"
+                    
+                    # Copy the raw audio file from the container
+                    cmd_copy = [
+                        "docker", "cp", 
+                        "piper-tts:/tmp/output.raw", 
+                        "output/temp.raw"
+                    ]
+                    
+                    if debug:
+                        print(f"Copying file: {' '.join(cmd_copy)}")
+                    
+                    result_copy = subprocess.run(cmd_copy, capture_output=True, text=True)
+                    
+                    if result_copy.returncode != 0:
+                        if debug:
+                            print(f"Copy failed: {result_copy.stderr}")
+                        return False, f"Failed to copy output: {result_copy.stderr}"
+                    
+                    # Read the raw audio and convert to WAV
+                    with open("output/temp.raw", "rb") as f:
+                        audio_data = f.read()
+                    
+                    if debug:
+                        print(f"Read {len(audio_data)} bytes from raw file")
+                    
+                except Exception as e:
+                    if debug:
+                        print(f"Direct command error: {e}")
             
             # If we didn't get any audio data, return error
             if not audio_data:
