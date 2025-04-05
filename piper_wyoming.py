@@ -8,6 +8,7 @@ import io
 import base64
 import os
 import logging
+import time
 
 logger = logging.getLogger("PiperWyoming")
 
@@ -25,7 +26,7 @@ class PiperWyomingClient:
         self.host = host
         self.port = port
         
-    def synthesize(self, text, output_file=None, speaker_id=0):
+    def synthesize(self, text, output_file=None, speaker_id=0, debug=False):
         """
         Synthesize speech from text and save to an output file.
         
@@ -33,6 +34,7 @@ class PiperWyomingClient:
             text: The text to synthesize
             output_file: Path to the output WAV file (or None to generate a path)
             speaker_id: Speaker ID for multi-speaker models (default: 0)
+            debug: Enable debug logging
             
         Returns:
             A tuple of (success, message)
@@ -52,6 +54,11 @@ class PiperWyomingClient:
         try:
             # Connect to the Wyoming server
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(10)  # Set timeout to 10 seconds
+            
+            if debug:
+                print(f"Connecting to {self.host}:{self.port}...")
+                
             s.connect((self.host, self.port))
             
             # Send synthesis request
@@ -63,6 +70,9 @@ class PiperWyomingClient:
                 }
             }
             
+            if debug:
+                print(f"Sending request: {json.dumps(request)}")
+                
             # Add newline to separate JSON objects
             s.sendall(json.dumps(request).encode() + b"\n")
             
@@ -70,38 +80,66 @@ class PiperWyomingClient:
             audio_data = bytearray()
             buffer = bytearray()
             
-            while True:
-                chunk = s.recv(4096)
-                if not chunk:
-                    break
-                
-                buffer.extend(chunk)
-                
-                # Process complete lines in the buffer
-                while b"\n" in buffer:
-                    line_end = buffer.find(b"\n")
-                    line = bytes(buffer[:line_end])
-                    buffer = buffer[line_end + 1:]
+            # Wait for response with timeout
+            start_time = time.time()
+            timeout = 30  # 30 seconds timeout
+            
+            while (time.time() - start_time) < timeout:
+                try:
+                    chunk = s.recv(4096)
+                    if not chunk:
+                        if debug:
+                            print("Connection closed by server")
+                        break
                     
-                    if line:
-                        try:
-                            response = json.loads(line)
-                            
-                            if response["type"] == "audio":
-                                # Decode base64 audio data
-                                audio_bytes = base64.b64decode(response["data"]["audio"])
-                                audio_data.extend(audio_bytes)
+                    if debug:
+                        print(f"Received {len(chunk)} bytes")
+                        
+                    buffer.extend(chunk)
+                    
+                    # Process complete lines in the buffer
+                    while b"\n" in buffer:
+                        line_end = buffer.find(b"\n")
+                        line = bytes(buffer[:line_end])
+                        buffer = buffer[line_end + 1:]
+                        
+                        if line:
+                            if debug:
+                                print(f"Processing line: {line[:100]}...")
                                 
-                            elif response["type"] == "error":
-                                return False, f"Server error: {response['data'].get('text', 'Unknown error')}"
+                            try:
+                                response = json.loads(line)
                                 
-                            elif response["type"] == "end":
-                                # End of audio stream
-                                break
+                                if debug:
+                                    print(f"Response type: {response['type']}")
                                 
-                        except json.JSONDecodeError as e:
-                            logger.warning(f"Failed to parse JSON: {e}")
-                            continue
+                                if response["type"] == "audio":
+                                    # Decode base64 audio data
+                                    audio_bytes = base64.b64decode(response["data"]["audio"])
+                                    audio_data.extend(audio_bytes)
+                                    
+                                elif response["type"] == "error":
+                                    return False, f"Server error: {response['data'].get('text', 'Unknown error')}"
+                                    
+                                elif response["type"] == "end":
+                                    # End of audio stream
+                                    if debug:
+                                        print("End of audio stream")
+                                    break
+                                    
+                            except json.JSONDecodeError as e:
+                                if debug:
+                                    print(f"Failed to parse JSON: {e}, Line: {line[:100]}...")
+                                continue
+                    
+                    # If we received end signal, break out of the loop
+                    if response.get("type") == "end":
+                        break
+                        
+                except socket.timeout:
+                    if debug:
+                        print("Socket timeout, retrying...")
+                    continue
             
             s.close()
             
@@ -120,5 +158,7 @@ class PiperWyomingClient:
             
         except ConnectionRefusedError:
             return False, f"Could not connect to Wyoming server at {self.host}:{self.port}"
+        except socket.timeout:
+            return False, f"Connection to {self.host}:{self.port} timed out"
         except Exception as e:
             return False, f"Failed to synthesize speech: {str(e)}"
