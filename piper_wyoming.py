@@ -10,6 +10,7 @@ import os
 import logging
 import time
 import sys
+import subprocess
 
 logger = logging.getLogger("PiperWyoming")
 
@@ -52,6 +53,19 @@ class PiperWyomingClient:
         # Create output directory if it doesn't exist
         os.makedirs(os.path.dirname(output_file), exist_ok=True)
         
+        # Try direct Docker approach for Windows to avoid encoding issues
+        if sys.platform == "win32":
+            return self._synthesize_via_docker(text, output_file, speaker_id, debug)
+        else:
+            # On Linux/macOS, try the Wyoming protocol first
+            success, message = self._synthesize_via_wyoming(text, output_file, speaker_id, debug)
+            if not success:
+                # Fall back to direct Docker approach if Wyoming fails
+                return self._synthesize_via_docker(text, output_file, speaker_id, debug)
+            return success, message
+    
+    def _synthesize_via_wyoming(self, text, output_file, speaker_id=0, debug=False):
+        """Use Wyoming protocol to communicate with Piper"""
         try:
             # Connect to the Wyoming server
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -97,7 +111,6 @@ class PiperWyomingClient:
                     if debug:
                         print(f"Received {len(chunk)} bytes")
                     
-                    # Fixed approach for Windows: use direct binary processing
                     # Look for JSON responses (they should be UTF-8 encoded and end with newline)
                     if state == 0:
                         buffer.extend(chunk)
@@ -159,64 +172,6 @@ class PiperWyomingClient:
             
             s.close()
             
-            # Try a direct approach - execute Docker commands
-            if not audio_data and sys.platform == "win32":
-                if debug:
-                    print("No audio data received. Trying direct Docker approach...")
-                
-                # Save the text to a temporary file
-                with open("temp_text.txt", "w", encoding="utf-8") as f:
-                    f.write(text)
-                
-                try:
-                    # Run piper directly in the container
-                    cmd = [
-                        "docker", "exec", "piper-tts",
-                        "sh", "-c", 
-                        f"cd /config && echo '{text}' | "
-                        f"/usr/share/piper/piper "
-                        f"--model /config/models/tts/en_US-joe-medium.onnx "
-                        f"--output_raw > /tmp/output.raw"
-                    ]
-                    
-                    if debug:
-                        print(f"Running command: {' '.join(cmd)}")
-                    
-                    result = subprocess.run(cmd, capture_output=True, text=True)
-                    
-                    if result.returncode != 0:
-                        if debug:
-                            print(f"Command failed: {result.stderr}")
-                        return False, f"Direct command failed: {result.stderr}"
-                    
-                    # Copy the raw audio file from the container
-                    cmd_copy = [
-                        "docker", "cp", 
-                        "piper-tts:/tmp/output.raw", 
-                        "output/temp.raw"
-                    ]
-                    
-                    if debug:
-                        print(f"Copying file: {' '.join(cmd_copy)}")
-                    
-                    result_copy = subprocess.run(cmd_copy, capture_output=True, text=True)
-                    
-                    if result_copy.returncode != 0:
-                        if debug:
-                            print(f"Copy failed: {result_copy.stderr}")
-                        return False, f"Failed to copy output: {result_copy.stderr}"
-                    
-                    # Read the raw audio and convert to WAV
-                    with open("output/temp.raw", "rb") as f:
-                        audio_data = f.read()
-                    
-                    if debug:
-                        print(f"Read {len(audio_data)} bytes from raw file")
-                    
-                except Exception as e:
-                    if debug:
-                        print(f"Direct command error: {e}")
-            
             # If we didn't get any audio data, return error
             if not audio_data:
                 return False, "No audio data received from server"
@@ -235,4 +190,84 @@ class PiperWyomingClient:
         except socket.timeout:
             return False, f"Connection to {self.host}:{self.port} timed out"
         except Exception as e:
-            return False, f"Failed to synthesize speech: {str(e)}"
+            return False, f"Failed to synthesize via Wyoming: {str(e)}"
+    
+    def _synthesize_via_docker(self, text, output_file, speaker_id=0, debug=False):
+        """Use direct Docker commands to generate speech"""
+        try:
+            if debug:
+                print("Using direct Docker approach...")
+            
+            # Clean the text for shell usage
+            clean_text = text.replace("'", "'\\''")
+            
+            # Create a temporary file for the raw audio
+            temp_raw = os.path.join("output", "temp.raw")
+            
+            # Run piper directly in the container
+            cmd = [
+                "docker", "exec", "piper-tts",
+                "sh", "-c", 
+                f"echo '{clean_text}' | "
+                f"/usr/share/piper/piper "
+                f"--model /config/models/tts/en_US-joe-medium.onnx "
+                f"--output_raw > /tmp/output.raw"
+            ]
+            
+            if debug:
+                print(f"Running command: {' '.join(cmd)}")
+            
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                if debug:
+                    print(f"Command failed: {result.stderr}")
+                return False, f"Direct command failed: {result.stderr}"
+            
+            # Copy the raw audio file from the container
+            cmd_copy = [
+                "docker", "cp", 
+                "piper-tts:/tmp/output.raw", 
+                temp_raw
+            ]
+            
+            if debug:
+                print(f"Copying file: {' '.join(cmd_copy)}")
+            
+            result_copy = subprocess.run(cmd_copy, capture_output=True, text=True)
+            
+            if result_copy.returncode != 0:
+                if debug:
+                    print(f"Copy failed: {result_copy.stderr}")
+                return False, f"Failed to copy output: {result_copy.stderr}"
+            
+            # Read the raw audio
+            if not os.path.exists(temp_raw):
+                return False, f"Raw audio file not created: {temp_raw}"
+                
+            with open(temp_raw, "rb") as f:
+                audio_data = f.read()
+            
+            if debug:
+                print(f"Read {len(audio_data)} bytes from raw file")
+                
+            if not audio_data:
+                return False, "No audio data in raw file"
+            
+            # Save as WAV file
+            with wave.open(output_file, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)  # 16-bit audio
+                wf.setframerate(22050)  # Default for most Piper models
+                wf.writeframes(audio_data)
+            
+            # Clean up temp file
+            try:
+                os.remove(temp_raw)
+            except:
+                pass
+                
+            return True, f"Speech generated successfully and saved to {output_file}"
+            
+        except Exception as e:
+            return False, f"Failed to synthesize via Docker: {str(e)}"
